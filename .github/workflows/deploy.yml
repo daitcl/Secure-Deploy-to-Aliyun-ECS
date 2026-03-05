@@ -1,0 +1,84 @@
+name: Secure Deploy to Aliyun ECS
+
+on:
+  push:
+    branches: [ main ]   # 触发分支，可按需修改
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # ---------- 1. 获取当前运行器的公网 IP ----------
+      - name: Get Runner Public IP
+        id: ip
+        run: |
+          RUNNER_IP=$(curl -s http://ifconfig.me)
+          echo "CURRENT_IP=$RUNNER_IP" >> $GITHUB_OUTPUT
+          echo "Runner IP: $RUNNER_IP"
+
+      # ---------- 2. 安装阿里云 CLI（二进制方式）----------
+      - name: Install Aliyun CLI
+        run: |
+          curl -LO "https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz"
+          tar -xzf aliyun-cli-linux-latest-amd64.tgz
+          mkdir -p $HOME/.local/bin
+          mv aliyun $HOME/.local/bin/
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          aliyun --version
+
+      # ---------- 3. 临时放行当前 IP（22 端口）----------
+      - name: Authorize Security Group (Add IP)
+        env:
+          ALIBABA_CLOUD_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIBABA_CLOUD_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          ALIBABA_CLOUD_REGION_ID: ${{ secrets.ALIYUN_REGION }}
+        run: |
+          aliyun ecs AuthorizeSecurityGroup \
+            --RegionId ${{ secrets.ALIYUN_REGION }} \
+            --SecurityGroupId ${{ secrets.ALIYUN_SECURITY_GROUP_ID }} \
+            --IpProtocol tcp \
+            --PortRange 22/22 \
+            --SourceCidrIp ${{ steps.ip.outputs.CURRENT_IP }}/32 \
+            --Policy accept \
+            --NicType intranet
+
+      # （可选）等待几秒让规则生效
+      - name: Wait for rule to take effect
+        run: sleep 5
+
+      # ---------- 在这里插入你的构建/部署步骤 ----------
+      # 例如：
+      # - name: Build and Deploy
+      #   run: |
+      #     echo "Your deployment commands here"
+      #   # 或使用 SSH Action：
+      # # ---------- 验证 SSH 访问成功 ----------
+      # - name: Verify SSH Connection
+      #   uses: appleboy/ssh-action@v1.0.3
+      #   with:
+      #     host: ${{ secrets.REMOTE_HOST }}          # ECS 公网 IP 或域名
+      #     username: ${{ secrets.REMOTE_USER }}      # 登录用户名（如 root 或普通用户）
+      #     key: ${{ secrets.SSH_PRIVATE_KEY }}       # 私钥内容（需在 secrets 中配置）
+      #     port: 22                                   # SSH 端口，默认 22
+      #     script: |
+      #       echo "✅ SSH connection to ECS is successful!"
+      #       echo "Hostname: $(hostname)"
+      #       echo "Current user: $(whoami)"
+      #       echo "Working directory: $(pwd)"
+      #       # 可以在此处添加更多验证命令，如检查必要目录是否存在
+
+      # ---------- 4. 撤销放行（删除刚才添加的规则）----------
+      - name: Revoke Security Group (Remove IP)
+        if: always()
+        env:
+          ALIBABA_CLOUD_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIBABA_CLOUD_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+          ALIBABA_CLOUD_REGION_ID: ${{ secrets.ALIYUN_REGION }}
+        run: |
+          aliyun ecs RevokeSecurityGroup \
+            --RegionId ${{ secrets.ALIYUN_REGION }} \
+            --SecurityGroupId ${{ secrets.ALIYUN_SECURITY_GROUP_ID }} \
+            --IpProtocol tcp \
+            --PortRange 22/22 \
+            --SourceCidrIp ${{ steps.ip.outputs.CURRENT_IP }}/32 \
+            --NicType intranet
