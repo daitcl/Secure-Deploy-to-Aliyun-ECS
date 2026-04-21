@@ -40,7 +40,9 @@ jobs:
             --PortRange 22/22 \
             --SourceCidrIp ${{ steps.ip.outputs.CURRENT_IP }}/32 \
             --Policy accept \
-            --NicType intranet
+            --NicType intranet \
+            --version 2014-05-26 \
+            --force
 
       # （可选）等待几秒让规则生效
       - name: Wait for rule to take effect
@@ -81,4 +83,6 @@ jobs:
             --IpProtocol tcp \
             --PortRange 22/22 \
             --SourceCidrIp ${{ steps.ip.outputs.CURRENT_IP }}/32 \
-            --NicType intranet
+            --NicType intranet \
+            --version 2014-05-26 \
+            --force || true
